@@ -28,7 +28,7 @@ print("Schema Created Successfully")
 df_sales = (
     spark.read.option("header", True)
     .schema(sales_schema)
-    .csv(file_path)
+    .csv(source_file)
 )
 
 # Display the raw sales data
