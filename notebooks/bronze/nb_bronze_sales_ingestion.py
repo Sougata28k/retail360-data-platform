@@ -1,16 +1,22 @@
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
-# Start the Bronze ingestion process
+
+# Start Bronze ingestion process
 print("Starting US101 Sales Bronze Ingestion")
 
-# Define the source CSV file
-source_file = "/Volumes/retail360_dev/raw/retail360_raw/sales_transactions_20260808.csv"
+# Source file configuration
+source_file = "sales_transactions_20260808.csv"
 
-# Print the source file being read
-print(f"Reading {source_file}")
+file_path = (
+    "/Volumes/retail360_dev/raw/retail360_raw/"
+    f"{source_file}"
+)
 
-# Define the schema for the sales transaction data
+print(f"Reading source file: {source_file}")
+
+
+# Define source schema
 sales_schema = StructType([
     StructField("transaction_id", StringType(), True),
     StructField("store_id", StringType(), True),
@@ -21,81 +27,123 @@ sales_schema = StructType([
     StructField("transaction_date", StringType(), True)
 ])
 
-# Confirm that the schema has been created successfully
-print("Schema Created Successfully")
 
-# Read the CSV file using the defined schema
+# Read source CSV file
 df_sales = (
-    spark.read.option("header", True)
+    spark.read
+    .option("header", True)
     .schema(sales_schema)
-    .csv(source_file)
+    .csv(file_path)
 )
 
-# Display the raw sales data
-display(df_sales)
 
-# Add ingestion-related metadata columns to the Bronze data
+# Add ingestion metadata
 df_bronze = (
     df_sales
-    # Capture the timestamp when the data is ingested
-    .withColumn(
-        "ingestion_timestamp",
-        current_timestamp()
-    )
-    # Store the name of the source file
-    .withColumn(
-        "source_file_name",
-        lit("sales_transactions_20260808.csv")
-    )
-    # Store the date on which the data is loaded
-    .withColumn(
-        "load_date",
-        current_date()
-    )
+    .withColumn("ingestion_timestamp", current_timestamp())
+    .withColumn("source_file_name", lit(source_file))
+    .withColumn("load_date", current_date())
 )
 
-# Display the Bronze data with ingestion metadata
-display(df_bronze)
 
-# Count the total number of records received from the source
-source_count = df_sales.count()
-print(source_count)
-
-# Identify records that fail the basic data quality checks
-# A record is rejected if:
-# - transaction_id is NULL
-# - store_id is NULL
-# - quantity is less than or equal to 0
-# - sale_amount is less than or equal to 0
+# Identify records that fail basic data quality checks
 reject_df = (
     df_bronze
     .filter(
         col("transaction_id").isNull()
-        |
-        col("store_id").isNull()
-        |
-        (col("quantity") <= 0)
-        |
-        (col("sale_amount") <= 0)
+        | col("store_id").isNull()
+        | (col("quantity") <= 0)
+        | (col("sale_amount") <= 0)
     )
 )
 
-# Display the rejected records
-display(reject_df)
 
-# Filter the records that pass the data quality checks
+# Filter valid records
 valid_df = (
     df_bronze
     .filter(
         col("transaction_id").isNotNull()
-        &
-        col("store_id").isNotNull()
-        &
-        (col("quantity") > 0)
-        &
-        (col("sale_amount") > 0)
+        & col("store_id").isNotNull()
+        & (col("quantity") > 0)
+        & (col("sale_amount") > 0)
     )
 )
 
-# Display the valid records
-display(valid_df)
+
+# Create required schemas
+spark.sql("""
+    CREATE SCHEMA IF NOT EXISTS retail360_dev.bronze
+""")
+
+spark.sql("""
+    CREATE SCHEMA IF NOT EXISTS retail360_dev.audit
+""")
+
+
+# Write valid records to Bronze table
+(
+    valid_df.write
+    .format("delta")
+    .mode("overwrite")
+    .saveAsTable(
+        "retail360_dev.bronze.sales_transactions"
+    )
+)
+
+
+# Write rejected records to Bronze rejects table
+(
+    reject_df.write
+    .format("delta")
+    .mode("overwrite")
+    .saveAsTable(
+        "retail360_dev.bronze.sales_transactions_rejects"
+    )
+)
+
+
+# Generate record counts for audit
+source_count = df_sales.count()
+valid_count = valid_df.count()
+reject_count = reject_df.count()
+
+
+# Create audit record
+audit_df = spark.createDataFrame(
+    [
+        (
+            "US101_SALES_BRONZE_LOAD",
+            source_file,
+            source_count,
+            valid_count,
+            reject_count,
+            "SUCCESS"
+        )
+    ],
+    [
+        "job_name",
+        "source_file",
+        "source_count",
+        "target_count",
+        "reject_count",
+        "status"
+    ]
+)
+
+
+# Write audit record
+(
+    audit_df.write
+    .format("delta")
+    .mode("append")
+    .saveAsTable(
+        "retail360_dev.audit.sales_load_audit"
+    )
+)
+
+
+# Load summary
+print("US101 Sales Bronze Load Completed Successfully")
+print(f"Source Records : {source_count}")
+print(f"Valid Records  : {valid_count}")
+print(f"Rejected       : {reject_count}")
