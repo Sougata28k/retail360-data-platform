@@ -88,11 +88,11 @@ valid_df = (
     df_bronze
     .filter(
         col("transaction_id").isNotNull()
-        |
+        &
         col("store_id").isNotNull()
-        |
+        &
         (col("quantity") > 0)
-        |
+        &
         (col("sale_amount") > 0)
     )
 )
