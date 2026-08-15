@@ -15,3 +15,13 @@ Processing Flow:
 5. Load into bronze layer
 6. Generate audit records
 7. capture rejected records
+
+
+## Implementation Completed 
+
+- Explicit Schema validation
+- Metadata Enrichment
+- Reject Record Framework
+- Bronze table creation
+- Reject Table creation
+- Audit Table creation
