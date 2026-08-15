@@ -5,7 +5,7 @@ from pyspark.sql.types import *
 print("Starting US101 Sales Bronze Ingestion")
 
 # Define the source CSV file
-source_file = "sales_transactions_20260808.csv"
+source_file = "/Volumes/workspace/retail360_dev/retail360_raw/sales_transactions_20260808.csv"
 
 # Print the source file being read
 print(f"Reading {source_file}")
