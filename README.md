@@ -6,12 +6,10 @@ using a modern cloud data platform architecture.
 
 ## Technology Stack
 
-- Azure Databricks
+- Databricks
 - PySpark
 - Delta Lake
-- Azure Data Factory
 - ADLS Gen2
-- Snowflake
 - GitHub
 - Jira
 
