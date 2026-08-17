@@ -1,16 +1,10 @@
-Data Quality Rules
+## Data Quality Rules
 
-DQ101
-transaction_id cannot be null
-
-DQ102
-quantity must be greater than 0
-
-DQ103
-sale_amount must be greater than 0
-
-DQ104
-store_id cannot be null
-
-DQ105
-transaction_id must be unique
+| Rule ID | Data Quality Rule | Action |
+|---|---|---|
+| DQ101 | `transaction_id` cannot be NULL, empty, whitespace, or literal `"NULL"` | Quarantine |
+| DQ102 | `store_id` cannot be NULL, empty, whitespace, or literal `"NULL"` | Quarantine |
+| DQ103 | `product_id` cannot be NULL, empty, whitespace, or literal `"NULL"` | Quarantine |
+| DQ104 | `quantity` must be present and greater than 0 | Quarantine |
+| DQ105 | `sale_amount` must be present and greater than or equal to 0 | Quarantine |
+| DQ106 | `transaction_date` cannot be NULL, empty, whitespace, or literal `"NULL"` | Quarantine |
