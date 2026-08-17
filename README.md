@@ -1,5 +1,4 @@
-﻿# Retail360 Data Platform
-# Retail360 Data Platform
+﻿# Retail360 Data Platfor
 
 Retail360 is an enterprise-style retail data engineering project
 designed to ingest, validate, transform and serve retail data
