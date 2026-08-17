@@ -3,180 +3,24 @@
 # ============================================================
 #
 # Purpose:
-# Ingest POS sales transaction files into the Retail360
-# Bronze layer and maintain ingestion audit information.
+# Ingest POS sales transaction files into the Bronze layer.
 #
-# Latest Updates:
-# - Added unique RUN_ID for execution tracking
-# - Added source system and ingestion metadata
-# - Added file-level idempotency check
-# - Added data quality validation and quarantine handling
-# - Added Bronze append-only ingestion
-# - Added audit logging with record counts and timestamps
-#
-# Processing Flow:
-# Source File
-#      ↓
-# Bronze Delta Table
-#      ↓
-# Data Quality Validation
-#      ↓
-# Quarantine Invalid Records
-#      ↓
-# Audit Load
+# Key capabilities:
+# - Explicit source schema
+# - Bronze ingestion metadata
+# - NULL / empty / whitespace / literal "NULL" handling
+# - Data quality validation
+# - Quarantine of rejected records
+# - Audit logging
+# - File-level idempotency
+# - Append-only Bronze storage
 #
 # ============================================================
-"""from pyspark.sql.functions import *
-from pyspark.sql.types import *
 
 
-# Start Bronze ingestion process
-print("Starting US101 Sales Bronze Ingestion")
-
-# Source file configuration
-source_file = "sales_transactions_20260808.csv"
-
-file_path = (
-    "/Volumes/retail360_dev/raw/retail360_raw/"
-    f"{source_file}"
-)
-
-print(f"Reading source file: {source_file}")
-
-
-# Define source schema
-sales_schema = StructType([
-    StructField("transaction_id", StringType(), True),
-    StructField("store_id", StringType(), True),
-    StructField("product_id", StringType(), True),
-    StructField("customer_id", StringType(), True),
-    StructField("quantity", IntegerType(), True),
-    StructField("sale_amount", DoubleType(), True),
-    StructField("transaction_date", StringType(), True)
-])
-
-
-# Read source CSV file
-df_sales = (
-    spark.read
-    .option("header", True)
-    .schema(sales_schema)
-    .csv(file_path)
-)
-
-
-# Add ingestion metadata
-df_bronze = (
-    df_sales
-    .withColumn("ingestion_timestamp", current_timestamp())
-    .withColumn("source_file_name", lit(source_file))
-    .withColumn("load_date", current_date())
-)
-
-
-# Identify records that fail basic data quality checks
-reject_df = (
-    df_bronze
-    .filter(
-        col("transaction_id").isNull()
-        | col("store_id").isNull()
-        | (col("quantity") <= 0)
-        | (col("sale_amount") <= 0)
-    )
-)
-
-
-# Filter valid records
-valid_df = (
-    df_bronze
-    .filter(
-        col("transaction_id").isNotNull()
-        & col("store_id").isNotNull()
-        & (col("quantity") > 0)
-        & (col("sale_amount") > 0)
-    )
-)
-
-
-# Create required schemas
-spark.sql("""
-    CREATE SCHEMA IF NOT EXISTS retail360_dev.bronze
-""")
-
-spark.sql("""
-    CREATE SCHEMA IF NOT EXISTS retail360_dev.audit
-""")
-
-
-# Write valid records to Bronze table
-(
-    valid_df.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(
-        "retail360_dev.bronze.sales_transactions"
-    )
-)
-
-
-# Write rejected records to Bronze rejects table
-(
-    reject_df.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(
-        "retail360_dev.bronze.sales_transactions_rejects"
-    )
-)
-
-
-# Generate record counts for audit
-source_count = df_sales.count()
-valid_count = valid_df.count()
-reject_count = reject_df.count()
-
-
-# Create audit record
-audit_df = spark.createDataFrame(
-    [
-        (
-            "US101_SALES_BRONZE_LOAD",
-            source_file,
-            source_count,
-            valid_count,
-            reject_count,
-            "SUCCESS"
-        )
-    ],
-    [
-        "job_name",
-        "source_file",
-        "source_count",
-        "target_count",
-        "reject_count",
-        "status"
-    ]
-)
-
-
-# Write audit record
-(
-    audit_df.write
-    .format("delta")
-    .mode("append")
-    .saveAsTable(
-        "retail360_dev.audit.sales_load_audit"
-    )
-)
-
-
-# Load summary
-print("US101 Sales Bronze Load Completed Successfully")
-print(f"Source Records : {source_count}")
-print(f"Valid Records  : {valid_count}")
-print(f"Rejected       : {reject_count}")
-"""
-
+# ============================================================
+# 1. JOB CONFIGURATION
+# ============================================================
 
 import uuid
 
@@ -184,13 +28,10 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
 
-# ============================================================
-# 1. JOB CONFIGURATION
-# ============================================================
-
 JOB_NAME = "US101_SALES_BRONZE_LOAD"
 SOURCE_SYSTEM = "POS"
-SOURCE_FILE = "sales_transactions_20260809.csv"
+
+SOURCE_FILE = "sales_missing_txns_test2.csv"
 
 SOURCE_PATH = (
     "/Volumes/retail360_dev/raw/retail360_raw/"
@@ -209,13 +50,15 @@ AUDIT_TABLE = (
     "retail360_dev.audit.sales_load_audit"
 )
 
-# Generate a unique identifier for this execution
+
+# Generate unique identifier for every execution
 RUN_ID = str(uuid.uuid4())
 
 
 print("=" * 70)
 print("Starting Bronze Ingestion")
 print("=" * 70)
+
 print(f"Job        : {JOB_NAME}")
 print(f"Run ID     : {RUN_ID}")
 print(f"Source     : {SOURCE_FILE}")
@@ -237,9 +80,6 @@ spark.sql("""
 
 # ============================================================
 # 3. CREATE AUDIT TABLE
-#
-# The audit table is created before the idempotency check
-# so that the pipeline can safely query it on the first run.
 # ============================================================
 
 spark.sql("""
@@ -277,7 +117,9 @@ sales_schema = StructType([
 # ============================================================
 # 5. CHECK WHETHER FILE WAS ALREADY PROCESSED
 #
-# Prevents the same source file from being loaded twice.
+# File-level idempotency:
+# If the same source file already has a SUCCESS audit record,
+# the ingestion will be skipped.
 # ============================================================
 
 file_already_processed = (
@@ -292,26 +134,38 @@ file_already_processed = (
 )
 
 
+# ============================================================
+# 6. IDEMPOTENCY CONTROL
+# ============================================================
+
 if file_already_processed:
+
+    print("=" * 70)
+    print("INGESTION SKIPPED")
+    print("=" * 70)
 
     print(
         f"File '{SOURCE_FILE}' has already been successfully processed."
     )
 
-    print("Skipping ingestion to maintain idempotency.")
+    print(
+        "Skipping ingestion to maintain idempotency."
+    )
+
+    print("=" * 70)
 
 
 else:
 
     # ========================================================
-    # 6. RECORD JOB START TIME
+    # 7. RECORD JOB START TIME
     # ========================================================
 
     job_start_time = current_timestamp()
 
 
     # ========================================================
-    # 7. READ SOURCE FILE
+    # 8. READ SOURCE FILE
     # ========================================================
 
     print(f"Reading source file: {SOURCE_PATH}")
@@ -326,14 +180,23 @@ else:
 
 
     # ========================================================
-    # 8. ADD INGESTION METADATA
+    # 9. ADD INGESTION METADATA
     # ========================================================
 
     df_bronze = (
         df_source
-        .withColumn("run_id", lit(RUN_ID))
-        .withColumn("source_system", lit(SOURCE_SYSTEM))
-        .withColumn("source_file_name", lit(SOURCE_FILE))
+        .withColumn(
+            "run_id",
+            lit(RUN_ID)
+        )
+        .withColumn(
+            "source_system",
+            lit(SOURCE_SYSTEM)
+        )
+        .withColumn(
+            "source_file_name",
+            lit(SOURCE_FILE)
+        )
         .withColumn(
             "ingestion_timestamp",
             current_timestamp()
@@ -346,91 +209,237 @@ else:
 
 
     # ========================================================
-    # 9. DATA QUALITY RULES
+    # 10. NORMALIZE STRING FIELDS FOR VALIDATION
     #
-    # Bronze keeps all successfully parsed source records.
-    # Records failing these checks are also written to the
-    # quarantine table for investigation.
+    # The following values are considered missing:
+    #
+    # 1. Actual NULL
+    # 2. Empty string
+    # 3. Whitespace-only string
+    # 4. Literal "NULL"
+    #
+    # Examples:
+    # "NULL"
+    # "null"
+    # " Null "
+    # ""
+    # "   "
+    #
+    # Bronze retains the original source values.
+    # Normalized columns are used only for validation.
     # ========================================================
 
-    reject_condition = (
-        col("transaction_id").isNull()
-        | col("store_id").isNull()
-        | col("product_id").isNull()
-        | col("quantity").isNull()
-        | (col("quantity") <= 0)
-        | col("sale_amount").isNull()
-        | (col("sale_amount") < 0)
-        | col("transaction_date").isNull()
+    def normalized_string(column_name):
+
+        cleaned_value = trim(
+            col(column_name)
+        )
+
+        return (
+            when(
+                cleaned_value.isNull()
+                | (length(cleaned_value) == 0)
+                | (lower(cleaned_value) == "null"),
+                lit(None)
+            )
+            .otherwise(cleaned_value)
+        )
+
+
+    # ========================================================
+    # 11. CREATE VALIDATION DATAFRAME
+    # ========================================================
+
+    df_validation = (
+        df_bronze
+
+        .withColumn(
+            "_transaction_id",
+            normalized_string("transaction_id")
+        )
+
+        .withColumn(
+            "_store_id",
+            normalized_string("store_id")
+        )
+
+        .withColumn(
+            "_product_id",
+            normalized_string("product_id")
+        )
+
+        .withColumn(
+            "_customer_id",
+            normalized_string("customer_id")
+        )
+
+        .withColumn(
+            "_transaction_date",
+            normalized_string("transaction_date")
+        )
     )
 
 
     # ========================================================
-    # 10. CREATE QUARANTINE DATA
+    # 12. DATA QUALITY REJECTION RULES
+    #
+    # Records failing one or more mandatory validation rules
+    # are sent to the quarantine table.
+    #
+    # Bronze still retains the original source record.
+    # ========================================================
+
+    reject_condition = (
+
+        # Transaction ID validation
+        col("_transaction_id").isNull()
+
+        |
+
+        # Store validation
+        col("_store_id").isNull()
+
+        |
+
+        # Product validation
+        col("_product_id").isNull()
+
+        |
+
+        # Quantity validation
+        col("quantity").isNull()
+
+        |
+
+        (col("quantity") <= 0)
+
+        |
+
+        # Sales amount validation
+        col("sale_amount").isNull()
+
+        |
+
+        (col("sale_amount") < 0)
+
+        |
+
+        # Transaction date validation
+        col("_transaction_date").isNull()
+    )
+
+
+    # ========================================================
+    # 13. CREATE QUARANTINE DATA
+    #
+    # Multiple validation failures are captured for the same
+    # record instead of stopping at the first failure.
+    #
+    # Example:
+    #
+    # transaction_id = NULL
+    # store_id       = NULL
+    # quantity       = -1
+    #
+    # reject_reason:
+    #
+    # MISSING_TRANSACTION_ID;
+    # MISSING_STORE_ID;
+    # INVALID_QUANTITY
     # ========================================================
 
     quarantine_df = (
-        df_bronze
-        .filter(reject_condition)
+        df_validation
+
+        .filter(
+            reject_condition
+        )
+
         .withColumn(
             "reject_reason",
-            when(
-                col("transaction_id").isNull(),
-                lit("MISSING_TRANSACTION_ID")
-            )
-            .when(
-                col("store_id").isNull(),
-                lit("MISSING_STORE_ID")
-            )
-            .when(
-                col("product_id").isNull(),
-                lit("MISSING_PRODUCT_ID")
-            )
-            .when(
-                col("quantity").isNull(),
-                lit("MISSING_QUANTITY")
-            )
-            .when(
-                col("quantity") <= 0,
-                lit("INVALID_QUANTITY")
-            )
-            .when(
-                col("sale_amount").isNull(),
-                lit("MISSING_SALE_AMOUNT")
-            )
-            .when(
-                col("sale_amount") < 0,
-                lit("INVALID_SALE_AMOUNT")
-            )
-            .when(
-                col("transaction_date").isNull(),
-                lit("MISSING_TRANSACTION_DATE")
-            )
-            .otherwise(
-                lit("UNKNOWN_VALIDATION_ERROR")
+
+            concat_ws(
+                "; ",
+
+                when(
+                    col("_transaction_id").isNull(),
+                    lit("MISSING_TRANSACTION_ID")
+                ),
+
+                when(
+                    col("_store_id").isNull(),
+                    lit("MISSING_STORE_ID")
+                ),
+
+                when(
+                    col("_product_id").isNull(),
+                    lit("MISSING_PRODUCT_ID")
+                ),
+
+                when(
+                    col("quantity").isNull(),
+                    lit("MISSING_QUANTITY")
+                ),
+
+                when(
+                    col("quantity") <= 0,
+                    lit("INVALID_QUANTITY")
+                ),
+
+                when(
+                    col("sale_amount").isNull(),
+                    lit("MISSING_SALE_AMOUNT")
+                ),
+
+                when(
+                    col("sale_amount") < 0,
+                    lit("INVALID_SALE_AMOUNT")
+                ),
+
+                when(
+                    col("_transaction_date").isNull(),
+                    lit("MISSING_TRANSACTION_DATE")
+                )
             )
         )
+
         .withColumn(
             "rejected_timestamp",
             current_timestamp()
         )
+
+        # Remove validation-only columns.
+        # Original source values remain unchanged.
+        .drop(
+            "_transaction_id",
+            "_store_id",
+            "_product_id",
+            "_customer_id",
+            "_transaction_date"
+        )
     )
 
 
     # ========================================================
-    # 11. RECORD COUNTS
+    # 14. RECORD COUNTS
     # ========================================================
 
     source_count = df_source.count()
+
     bronze_count = df_bronze.count()
+
     quarantine_count = quarantine_df.count()
 
 
     # ========================================================
-    # 12. WRITE BRONZE TABLE
+    # 15. WRITE BRONZE TABLE
     #
-    # Bronze is append-only so previous ingestion history
-    # is not overwritten.
+    # Bronze is append-only.
+    #
+    # All successfully parsed source records are retained in
+    # Bronze, including records that fail data-quality rules.
+    #
+    # Rejected records are additionally copied to quarantine.
     # ========================================================
 
     (
@@ -442,7 +451,9 @@ else:
 
 
     # ========================================================
-    # 13. WRITE QUARANTINE TABLE
+    # 16. WRITE QUARANTINE TABLE
+    #
+    # Only records failing validation are written here.
     # ========================================================
 
     (
@@ -454,43 +465,49 @@ else:
 
 
     # ========================================================
-    # 14. CREATE AUDIT RECORD
+    # 17. CREATE AUDIT RECORD
     # ========================================================
 
-    audit_df = spark.createDataFrame(
-        [
-            (
-                RUN_ID,
-                JOB_NAME,
-                SOURCE_SYSTEM,
-                SOURCE_FILE,
-                source_count,
-                bronze_count,
-                quarantine_count,
-                "SUCCESS"
-            )
-        ],
-        [
-            "run_id",
-            "job_name",
-            "source_system",
-            "source_file",
-            "source_count",
-            "bronze_count",
-            "quarantine_count",
-            "status"
-        ]
-    ).withColumn(
-        "start_timestamp",
-        job_start_time
-    ).withColumn(
-        "end_timestamp",
-        current_timestamp()
+    audit_df = (
+        spark.createDataFrame(
+            [
+                (
+                    RUN_ID,
+                    JOB_NAME,
+                    SOURCE_SYSTEM,
+                    SOURCE_FILE,
+                    source_count,
+                    bronze_count,
+                    quarantine_count,
+                    "SUCCESS"
+                )
+            ],
+            [
+                "run_id",
+                "job_name",
+                "source_system",
+                "source_file",
+                "source_count",
+                "bronze_count",
+                "quarantine_count",
+                "status"
+            ]
+        )
+
+        .withColumn(
+            "start_timestamp",
+            job_start_time
+        )
+
+        .withColumn(
+            "end_timestamp",
+            current_timestamp()
+        )
     )
 
 
     # ========================================================
-    # 15. WRITE AUDIT RECORD
+    # 18. WRITE AUDIT RECORD
     # ========================================================
 
     (
@@ -502,7 +519,15 @@ else:
 
 
     # ========================================================
-    # 16. LOAD SUMMARY
+    # 19. LOAD SUMMARY
+    #
+    # IMPORTANT:
+    # This section is INSIDE the ELSE block.
+    #
+    # Therefore it will execute only when a new file is
+    # actually processed.
+    #
+    # It will NOT execute when idempotency skips the file.
     # ========================================================
 
     print("=" * 70)
@@ -515,4 +540,5 @@ else:
     print(f"Bronze Records   : {bronze_count}")
     print(f"Quarantine       : {quarantine_count}")
     print("Status           : SUCCESS")
+
     print("=" * 70)
