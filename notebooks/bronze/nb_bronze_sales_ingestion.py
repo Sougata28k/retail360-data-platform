@@ -1,3 +1,31 @@
+# ============================================================
+# US101 - SALES BRONZE INGESTION
+# ============================================================
+#
+# Purpose:
+# Ingest POS sales transaction files into the Retail360
+# Bronze layer and maintain ingestion audit information.
+#
+# Latest Updates:
+# - Added unique RUN_ID for execution tracking
+# - Added source system and ingestion metadata
+# - Added file-level idempotency check
+# - Added data quality validation and quarantine handling
+# - Added Bronze append-only ingestion
+# - Added audit logging with record counts and timestamps
+#
+# Processing Flow:
+# Source File
+#      ↓
+# Bronze Delta Table
+#      ↓
+# Data Quality Validation
+#      ↓
+# Quarantine Invalid Records
+#      ↓
+# Audit Load
+#
+# ============================================================
 """from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
@@ -148,34 +176,7 @@ print(f"Source Records : {source_count}")
 print(f"Valid Records  : {valid_count}")
 print(f"Rejected       : {reject_count}")
 """
-# ============================================================
-# US101 - SALES BRONZE INGESTION
-# ============================================================
-#
-# Purpose:
-# Ingest POS sales transaction files into the Retail360
-# Bronze layer and maintain ingestion audit information.
-#
-# Latest Updates:
-# - Added unique RUN_ID for execution tracking
-# - Added source system and ingestion metadata
-# - Added file-level idempotency check
-# - Added data quality validation and quarantine handling
-# - Added Bronze append-only ingestion
-# - Added audit logging with record counts and timestamps
-#
-# Processing Flow:
-# Source File
-#      ↓
-# Bronze Delta Table
-#      ↓
-# Data Quality Validation
-#      ↓
-# Quarantine Invalid Records
-#      ↓
-# Audit Load
-#
-# ============================================================
+
 
 import uuid
 
